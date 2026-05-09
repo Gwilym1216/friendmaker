@@ -1,9 +1,16 @@
 #include <Arduino.h>
 
 #include "config.h"
-#include "classic_bt_controller_transport.h"
 #include "controller.h"
 #include "protocol.h"
+
+#if defined(SWITCH_AUTO_DRAW_USE_CLASSIC_BT)
+#include "classic_bt_controller_transport.h"
+#endif
+
+#if defined(SWITCH_AUTO_DRAW_USE_USB_HID)
+#include "usb_hid_controller_transport.h"
+#endif
 
 #if USE_MOCK_CONTROLLER
 #include "mock_controller_transport.h"
@@ -28,6 +35,9 @@ struct SequencedCommandCache {
 #if USE_MOCK_CONTROLLER
 MockControllerTransport mockTransport;
 ControllerTransport &transport = mockTransport;
+#elif defined(SWITCH_AUTO_DRAW_USE_USB_HID)
+UsbHidControllerTransport usbHidTransport;
+ControllerTransport &transport = usbHidTransport;
 #else
 ClassicBtControllerTransport classicBtTransport;
 ControllerTransport &transport = classicBtTransport;
@@ -169,6 +179,11 @@ void cacheSequencedResult(const SequencedFrame &frame, const String &ackLine) {
   sequencedCommandCache.lastAckLine = ackLine;
 }
 
+void printSequencedAck(const String &ackLine) {
+  Serial.println(ackLine);
+  Serial.flush();
+}
+
 }  // namespace
 
 void setup() {
@@ -201,7 +216,7 @@ void loop() {
   String ackLine;
 
   if (!validateSequencedFrame(frame, ackLine)) {
-    Serial.println(ackLine);
+    printSequencedAck(ackLine);
     return;
   }
 
@@ -211,11 +226,11 @@ void loop() {
   if (ok) {
     ackLine = makeOkAck(frame);
     cacheSequencedResult(frame, ackLine);
-    Serial.println(ackLine);
+    printSequencedAck(ackLine);
     return;
   }
 
   ackLine = makeErrorAck(frame, error.length() > 0 ? error : "unknown error");
   cacheSequencedResult(frame, ackLine);
-  Serial.println(ackLine);
+  printSequencedAck(ackLine);
 }

@@ -91,6 +91,28 @@ test("deriveControllerStatus marks congested inferred-ready links as unstable", 
   assert.equal(status?.lastAclDisconnectReason, 19);
 });
 
+test("deriveControllerStatus treats USB HID transport as sendable when USB is started", () => {
+  const status = deriveControllerStatus([
+    "INFO transport=usb-hid-switch",
+    "INFO usb_mode=switch-hid",
+    "INFO usb_started=true",
+    "INFO usb_reports=1",
+    "INFO usb_report_failures=1",
+  ]);
+
+  assert.ok(status);
+  assert.equal(status?.tone, "success");
+  assert.equal(status?.transport, "usb-hid-switch");
+  assert.equal(status?.profile, "switch-hid");
+  assert.equal(status?.connected, "USB已启动");
+  assert.equal(status?.paired, "不适用");
+  assert.equal(status?.ready, "可发送");
+  assert.equal(status?.connectedValue, true);
+  assert.equal(status?.pairedValue, true);
+  assert.equal(status?.readyValue, true);
+  assert.equal(status?.sendReportFailureCount, 1);
+});
+
 test("shouldReuseExistingControllerConnection keeps active bluetooth sessions intact", () => {
   assert.equal(
     shouldReuseExistingControllerConnection({
@@ -163,12 +185,12 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /els\.controllerInfoButton\.addEventListener\("click", async \(\) => \{[\s\S]*await requestControllerStatus\(\)[\s\S]*shouldReuseExistingControllerConnection\(state\.controller\.status\)[\s\S]*runControllerCommands\(\["BT RESET", "I"\], "连接手柄"\)/u,
+    /els\.controllerInfoButton\.addEventListener\("click", async \(\) => \{[\s\S]*await requestControllerStatus\(\)[\s\S]*shouldReuseExistingControllerConnection\(state\.controller\.status\)[\s\S]*runControllerCommands\(\["BT RESET LAST-PEER", "I"\], "连接手柄"\)/u,
   );
 
   assert.match(
     appSource,
-    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
+    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*当前不会自动重置蓝牙[\s\S]*setControllerRecoveryFailedStatus\(/u,
   );
 
   assert.match(
@@ -178,11 +200,16 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒，自动重置蓝牙并重试一次。[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
+    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒[\s\S]*当前不会自动重置蓝牙[\s\S]*setControllerRecoveryFailedStatus\(/u,
   );
 
   assert.match(
     appSource,
-    /if \(payload\) \{[\s\S]*startControllerStatusPolling\(\);[\s\S]*\} else \{[\s\S]*setControllerRecoveryFailedStatus\(/u,
+    /ensureFreshControllerActionStatus\(action\)[\s\S]*runControllerCommands\(commands, `测试动作 \$\{action\}`\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /const shouldRefreshStatusAfterRun = !commands\.some\(\(command\) => command\.trim\(\) === "I"\)[\s\S]*await requestControllerStatus\(\);/u,
   );
 });

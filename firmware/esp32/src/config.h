@@ -30,7 +30,11 @@ constexpr uint8_t BASIC_COLOR_ANCHOR_COL = 0;
 constexpr uint8_t BASIC_COLOR_INITIAL_SLOT_ROWS[COLOR_PALETTE_SLOT_COUNT] = {6, 0, 3, 3, 3, 3, 3, 3, 3};
 constexpr uint8_t BASIC_COLOR_INITIAL_SLOT_COLS[COLOR_PALETTE_SLOT_COUNT] = {0, 0, 10, 9, 8, 6, 5, 2, 1};
 constexpr char FIRMWARE_NAME[] = "switch-auto-draw";
+#if defined(SWITCH_AUTO_DRAW_USE_USB_HID)
+constexpr char BOARD_FAMILY[] = "esp32-s3-usb";
+#else
 constexpr char BOARD_FAMILY[] = "esp32-classic";
+#endif
 constexpr char BT_DEVICE_NAME[] = "Pro Controller";
 constexpr char BT_DEVICE_PROVIDER[] = "Nintendo";
 constexpr char BT_DEVICE_DESCRIPTION[] = "Gamepad";
@@ -40,6 +44,9 @@ constexpr uint8_t GAMEPAD_REPORT_ID = 1;
 
 #if defined(SWITCH_AUTO_DRAW_USE_CLASSIC_BT)
 constexpr char CONTROL_TRANSPORT[] = "classic-bt-uartswitchcon";
+constexpr bool USE_MOCK_CONTROLLER = false;
+#elif defined(SWITCH_AUTO_DRAW_USE_USB_HID)
+constexpr char CONTROL_TRANSPORT[] = "usb-hid-switch";
 constexpr bool USE_MOCK_CONTROLLER = false;
 #else
 constexpr char CONTROL_TRANSPORT[] = "mock-classic-bt";

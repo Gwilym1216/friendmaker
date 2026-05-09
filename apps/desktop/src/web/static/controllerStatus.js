@@ -32,7 +32,8 @@ function splitEmbeddedDeviceLine(line) {
 }
 
 function hasControllerInitError(value) {
-  return value !== "-" && value !== "none" && value !== "ESP_OK";
+  const normalized = String(value ?? "").trim();
+  return normalized !== "" && normalized !== "-" && normalized !== "none" && normalized !== "ESP_OK";
 }
 
 function numberFromInfo(value) {
@@ -114,6 +115,47 @@ export function deriveControllerStatus(lines) {
     return null;
   }
 
+  const isUsbHidSwitch = info.transport === "usb-hid-switch" || info.usb_mode === "switch-hid";
+  if (isUsbHidSwitch) {
+    const usbStarted = boolFromInfo(info.usb_started);
+    const usbReportFailures = numberFromInfo(info.usb_report_failures) ?? 0;
+    const usbReports = numberFromInfo(info.usb_reports) ?? 0;
+    const ready = usbStarted === true;
+
+    return {
+      tone: ready ? "success" : "warning",
+      pill: ready ? "USB就绪" : "USB未就绪",
+      title: ready ? "USB有线手柄已启动" : "USB有线手柄还未启动",
+      detail: ready
+        ? "开发板已经启用 USB HID 手柄输出。请确认 Switch Lite 仍通过 OTG 接在开发板原生 USB 口上，然后可以继续发送按键和方向命令。"
+        : "开发板还没有成功启动 USB HID 手柄输出。请检查固件环境、右侧原生 USB 口和 Switch Lite OTG 连接。",
+      transport: info.transport ?? "usb-hid-switch",
+      profile: info.usb_mode ?? "switch-hid",
+      discoverable: "不适用",
+      auth: "不适用",
+      connected: ready ? "USB已启动" : "USB未启动",
+      paired: "不适用",
+      ready: ready ? "可发送" : "未就绪",
+      discoverableValue: null,
+      authValue: null,
+      connectedValue: ready,
+      pairedValue: ready,
+      readyValue: ready,
+      peer: "-",
+      initStep: "-",
+      initError: "-",
+      rawReadyValue: ready,
+      readyInferredValue: false,
+      unstableValue: false,
+      reconnectRecommendedValue: false,
+      sendReportFailureCount: usbReportFailures,
+      lastSendReportStatus: null,
+      lastSendReportReason: null,
+      lastAclDisconnectReason: null,
+      lastDropReason: usbReports > 0 && usbReportFailures > 0 ? "usb_report_failed" : "-",
+    };
+  }
+
   const discoverable = boolFromInfo(info.bt_discoverable);
   const authComplete = boolFromInfo(info.bt_auth_complete);
   const connected = boolFromInfo(info.bt_connected);
@@ -135,7 +177,11 @@ export function deriveControllerStatus(lines) {
     sendReportFailureCount >= 10;
   const readyInferredFromPairing = rawReady !== true && connected === true && paired === true && !unstableInferredReady;
   const ready = rawReady === true || readyInferredFromPairing;
-  const initError = info.bt_init_error ?? "-";
+  const initError = String(info.bt_init_error ?? "-").trim() || "-";
+  const discoverableInferredFromInit =
+    discoverable !== false &&
+    info.bt_init_step === "discoverable" &&
+    !hasControllerInitError(initError);
 
   let tone = "idle";
   let pill = "待连接";
@@ -165,7 +211,7 @@ export function deriveControllerStatus(lines) {
     pill = "已认证";
     title = "认证已通过";
     detail = "Switch 已完成蓝牙认证，正在尝试把这块板子接成可用手柄。";
-  } else if (discoverable === true) {
+  } else if (discoverable === true || discoverableInferredFromInit) {
     tone = "running";
     pill = "广播中";
     title = "等待 Switch 发现";
@@ -189,7 +235,7 @@ export function deriveControllerStatus(lines) {
     connected: boolLabel(connected, ["已连接", "未连接"]),
     paired: boolLabel(paired, ["已配对", "未配对"]),
     ready: boolLabel(ready, ["可发送", "未就绪"]),
-    discoverableValue: discoverable,
+    discoverableValue: discoverable === true || discoverableInferredFromInit,
     authValue: authComplete,
     connectedValue: connected,
     pairedValue: paired,
