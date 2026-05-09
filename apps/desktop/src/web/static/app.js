@@ -1,5 +1,7 @@
 import {
+  asControllerDisconnectedStatus,
   deriveControllerStatus,
+  shouldMarkControllerDisconnected,
   shouldReuseExistingControllerConnection,
 } from "./controllerStatus.js";
 import {
@@ -178,6 +180,7 @@ const state = {
       readyInferredValue: false,
       unstableValue: false,
       reconnectRecommendedValue: false,
+      disconnectedValue: false,
       sendReportFailureCount: 0,
       lastSendReportStatus: null,
       lastSendReportReason: null,
@@ -364,6 +367,7 @@ const STUDIO_RESET_REVEAL_DELAY_MS = 4_000;
 let firmwareFlashPollTimer = null;
 let controllerStatusPollTimer = null;
 let controllerStatusPollDeadlineMs = 0;
+let controllerStatusPollIntervalMs = 0;
 let controllerStatusPollInFlight = false;
 let controllerStatusTimeoutRecoveryAttempted = false;
 let studioPreviewRefreshTimer = null;
@@ -372,6 +376,7 @@ let studioPreviewBoundsRequestSerial = 0;
 const studioTemplateOverlayCache = new Map();
 const CONTROLLER_STATUS_POLL_INTERVAL_MS = 1_000;
 const CONTROLLER_STATUS_POLL_WINDOW_MS = 45_000;
+const CONTROLLER_READY_WATCH_INTERVAL_MS = 3_000;
 
 const STUDIO_IMAGE_SCALE_LIMITS = {
   min: 25,
@@ -1212,6 +1217,7 @@ async function executeStudioCommands({ logPrefix }) {
 
   appendLog(els.studioLogOutput, logPrefix);
 
+  stopControllerStatusPolling();
   setStudioBusy(true);
 
   try {
@@ -2453,6 +2459,7 @@ function setControllerPendingStatus({ title, detail }) {
     readyInferredValue: false,
     unstableValue: false,
     reconnectRecommendedValue: false,
+    disconnectedValue: false,
     sendReportFailureCount: 0,
     lastSendReportStatus: null,
     lastSendReportReason: null,
@@ -2469,7 +2476,12 @@ function updateControllerStatusFromLines(lines) {
   if (!status) {
     return;
   }
-  setControllerStatus(status);
+
+  const previousStatus = state.controller.status;
+  const nextStatus = shouldMarkControllerDisconnected(previousStatus, status)
+    ? asControllerDisconnectedStatus(status)
+    : status;
+  setControllerStatus(nextStatus);
 }
 
 function isControllerReadyForStudio() {
@@ -2636,6 +2648,15 @@ async function pollControllerStatus() {
     return;
   }
 
+  if (state.controller.status.disconnectedValue === true) {
+    stopControllerStatusPolling();
+    appendLog(
+      els.controllerLogOutput,
+      "检测到蓝牙手柄已断开。请在 Switch 端进入“更改握法/顺序”页面，然后点击网页端“连接手柄”重新配对。",
+    );
+    return;
+  }
+
   if (state.controller.status.reconnectRecommendedValue === true) {
     stopControllerStatusPolling();
     state.controller.autoReconnectAttempted = true;
@@ -2650,11 +2671,31 @@ async function pollControllerStatus() {
   }
 
   if (
-    state.controller.status.readyValue === true ||
     state.controller.status.tone === "error"
   ) {
     stopControllerStatusPolling();
+    return;
   }
+
+  if (state.controller.status.readyValue === true) {
+    controllerStatusPollDeadlineMs = 0;
+    ensureControllerStatusPollTimer(CONTROLLER_READY_WATCH_INTERVAL_MS);
+  }
+}
+
+function ensureControllerStatusPollTimer(intervalMs) {
+  if (controllerStatusPollTimer && controllerStatusPollIntervalMs === intervalMs) {
+    return;
+  }
+
+  if (controllerStatusPollTimer) {
+    window.clearInterval(controllerStatusPollTimer);
+  }
+
+  controllerStatusPollIntervalMs = intervalMs;
+  controllerStatusPollTimer = window.setInterval(() => {
+    void pollControllerStatus();
+  }, intervalMs);
 }
 
 function startControllerStatusPolling(durationMs = CONTROLLER_STATUS_POLL_WINDOW_MS) {
@@ -2667,11 +2708,7 @@ function startControllerStatusPolling(durationMs = CONTROLLER_STATUS_POLL_WINDOW
     Date.now() + durationMs,
   );
 
-  if (!controllerStatusPollTimer) {
-    controllerStatusPollTimer = window.setInterval(() => {
-      void pollControllerStatus();
-    }, CONTROLLER_STATUS_POLL_INTERVAL_MS);
-  }
+  ensureControllerStatusPollTimer(CONTROLLER_STATUS_POLL_INTERVAL_MS);
 
   void pollControllerStatus();
 }
@@ -2685,10 +2722,12 @@ function stopControllerStatusPolling() {
 
   window.clearInterval(controllerStatusPollTimer);
   controllerStatusPollTimer = null;
+  controllerStatusPollIntervalMs = 0;
 }
 
 function renderStudioConnectionStatus() {
   const ready = state.controller.status.readyValue === true;
+  const disconnected = state.controller.status.disconnectedValue === true;
   const connected = state.controller.status.connectedValue === true;
   const auth = state.controller.status.authValue === true;
   const discoverable = state.controller.status.discoverableValue === true;
@@ -2703,6 +2742,11 @@ function renderStudioConnectionStatus() {
     pill = "已连接";
     title = "手柄已连接，可以开始绘制";
     detail = `当前开发板已经处于可发送状态，可以把绘制脚本发到 ${state.selectedPortPath || "串口设备"}。`;
+  } else if (disconnected) {
+    tone = "warning";
+    pill = "已断开";
+    title = "手柄已断开";
+    detail = "Switch 已经不再保持开发板蓝牙手柄连接。通常直接到“手柄测试”页点击“连接手柄”即可恢复；如果长时间无法恢复或一直广播，再进入 Switch 的“更改握法/顺序”页面后重试。";
   } else {
     tone = "warning";
     pill = "需要测试";

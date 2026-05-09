@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  asControllerDisconnectedStatus,
   deriveControllerStatus,
   normalizeControllerDeviceLines,
   readInfoLineMap,
+  shouldMarkControllerDisconnected,
   shouldReuseExistingControllerConnection,
 } from "../src/web/static/controllerStatus.js";
 
@@ -170,6 +172,53 @@ test("shouldReuseExistingControllerConnection keeps active bluetooth sessions in
     }),
     false,
   );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: false,
+      authValue: false,
+      discoverableValue: false,
+      disconnectedValue: true,
+    }),
+    false,
+  );
+});
+
+test("controller status marks a previously ready bluetooth controller as disconnected", () => {
+  const nextStatus = deriveControllerStatus([
+    "INFO transport=classic-bt-uartswitchcon",
+    "INFO bt_profile=uartswitchcon-pro-controller",
+    "INFO bt_discoverable=false",
+    "INFO bt_auth_complete=false",
+    "INFO bt_connected=false",
+    "INFO bt_paired=false",
+    "INFO bt_ready_for_reports=false",
+    "INFO bt_last_peer=E0:EF:BF:10:40:25",
+    "INFO bt_last_acl_disconnect_reason=19",
+    "INFO bt_init_step=discoverable",
+    "INFO bt_init_error=ESP_OK",
+  ]);
+
+  assert.ok(nextStatus);
+  assert.equal(
+    shouldMarkControllerDisconnected(
+      {
+        readyValue: true,
+      },
+      nextStatus,
+    ),
+    true,
+  );
+
+  const disconnectedStatus = asControllerDisconnectedStatus(nextStatus);
+  assert.equal(disconnectedStatus.tone, "warning");
+  assert.equal(disconnectedStatus.pill, "已断开");
+  assert.equal(disconnectedStatus.title, "手柄已断开");
+  assert.equal(disconnectedStatus.ready, "未就绪");
+  assert.equal(disconnectedStatus.readyValue, false);
+  assert.equal(disconnectedStatus.disconnectedValue, true);
+  assert.match(disconnectedStatus.detail, /直接点击网页端“连接手柄”即可恢复/u);
+  assert.match(disconnectedStatus.detail, /更改握法\/顺序/u);
 });
 
 test("controller status updates also resync the controller action buttons", async () => {
@@ -201,6 +250,26 @@ test("controller status updates also resync the controller action buttons", asyn
   assert.match(
     appSource,
     /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒[\s\S]*当前不会自动重置蓝牙[\s\S]*setControllerRecoveryFailedStatus\(/u,
+  );
+
+  assert.match(
+    appSource,
+    /shouldMarkControllerDisconnected\(previousStatus, status\)[\s\S]*asControllerDisconnectedStatus\(status\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /state\.controller\.status\.disconnectedValue === true[\s\S]*检测到蓝牙手柄已断开[\s\S]*stopControllerStatusPolling\(\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /state\.controller\.status\.readyValue === true[\s\S]*controllerStatusPollDeadlineMs = 0[\s\S]*ensureControllerStatusPollTimer\(CONTROLLER_READY_WATCH_INTERVAL_MS\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /async function executeStudioCommands[\s\S]*appendLog\(els\.studioLogOutput, logPrefix\);[\s\S]*stopControllerStatusPolling\(\);[\s\S]*setStudioBusy\(true\);/u,
   );
 
   assert.match(

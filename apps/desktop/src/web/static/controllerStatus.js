@@ -97,7 +97,11 @@ export function isControllerSendableStatus({ connected, paired, ready }) {
 }
 
 export function shouldReuseExistingControllerConnection(status) {
-  if (status?.reconnectRecommendedValue === true || status?.unstableValue === true) {
+  if (
+    status?.disconnectedValue === true ||
+    status?.reconnectRecommendedValue === true ||
+    status?.unstableValue === true
+  ) {
     return false;
   }
 
@@ -106,6 +110,38 @@ export function shouldReuseExistingControllerConnection(status) {
     status?.connectedValue === true ||
     status?.authValue === true
   );
+}
+
+export function shouldMarkControllerDisconnected(previousStatus, nextStatus) {
+  const nextTransport = String(nextStatus?.transport ?? "");
+  const nextProfile = String(nextStatus?.profile ?? "");
+  const isUsbHidSwitch = nextTransport === "usb-hid-switch" || nextProfile === "switch-hid";
+
+  return (
+    previousStatus?.readyValue === true &&
+    !isUsbHidSwitch &&
+    nextStatus?.readyValue !== true &&
+    nextStatus?.connectedValue !== true &&
+    nextStatus?.authValue !== true
+  );
+}
+
+export function asControllerDisconnectedStatus(status) {
+  return {
+    ...status,
+    tone: "warning",
+    pill: "已断开",
+    title: "手柄已断开",
+    detail:
+      "检测到 Switch 已经不再保持这块开发板的蓝牙手柄连接。常见原因是你直接操作了 Switch Lite 原生手柄，Switch 会切回原生输入并断开这个蓝牙手柄。通常直接点击网页端“连接手柄”即可恢复；如果长时间无法恢复或一直停在广播中，再进入 Switch 的“更改握法/顺序”页面后重试。",
+    ready: "未就绪",
+    readyValue: false,
+    rawReadyValue: false,
+    readyInferredValue: false,
+    unstableValue: false,
+    reconnectRecommendedValue: false,
+    disconnectedValue: true,
+  };
 }
 
 export function deriveControllerStatus(lines) {
@@ -148,6 +184,7 @@ export function deriveControllerStatus(lines) {
       readyInferredValue: false,
       unstableValue: false,
       reconnectRecommendedValue: false,
+      disconnectedValue: false,
       sendReportFailureCount: usbReportFailures,
       lastSendReportStatus: null,
       lastSendReportReason: null,
@@ -247,6 +284,7 @@ export function deriveControllerStatus(lines) {
     readyInferredValue: readyInferredFromPairing,
     unstableValue: unstableInferredReady,
     reconnectRecommendedValue: unstableInferredReady,
+    disconnectedValue: false,
     sendReportFailureCount,
     lastSendReportStatus,
     lastSendReportReason,
